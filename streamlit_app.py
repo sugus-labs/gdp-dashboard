@@ -307,10 +307,10 @@ def main():
             st.write(f"Mean Absolute Error (MAE): {metrics['mae']:.2f}")
             st.write(f"Root Mean Squared Error (RMSE): {metrics['rmse']:.2f}")
 
-            if metrics['mape'] > 5:
-                st.warning("MAPE is above 5%. Consider adding more features or tuning the model further.")
-            else:
-                st.success("MAPE is below 5%. The model is performing well.")
+            #if metrics['mape'] > 5:
+            #    st.warning("MAPE is above 5%. Consider adding more features or tuning the model further.")
+            #else:
+            #    st.success("MAPE is below 5%. The model is performing well.")
 
             # Display model components
             #st.subheader("Model Components")
