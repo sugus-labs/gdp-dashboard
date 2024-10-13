@@ -226,6 +226,10 @@ def plot_forecast(merged_df):
         labels={'value': 'Sales', 'variable': 'Legend'},
         title="Actual vs Forecasted Sales"
     )
+
+    fig.update_traces(line=dict(color='blue'), selector=dict(name='REAL SALES'))
+    fig.update_traces(line=dict(color='green'), selector=dict(name='FORECASTED SALES'))
+
     st.plotly_chart(fig, use_container_width=True)
 
 
