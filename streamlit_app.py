@@ -7,6 +7,8 @@ import plotly.express as px
 from datetime import timedelta
 from prophet.diagnostics import cross_validation, performance_metrics
 from sklearn.model_selection import ParameterGrid
+import scipy.stats as stats
+import ephem
 
 # Set Streamlit page configuration
 st.set_page_config(page_title="ARMADA Sales Forecasting", layout="wide")
@@ -22,6 +24,16 @@ def load_data(file_path):
         st.error("The specified file was not found.")
         return None
 
+def calculate_lunar_phase(dates):
+    """
+    Calculate the lunar phase for each date.
+    """
+    phases = []
+    for date in dates:
+        moon = ephem.Moon(date)
+        moon_phase = moon.phase  # Returns the phase of the moon (0-29.53 days)
+        phases.append(moon_phase)
+    return phases
 
 @st.cache_data
 def preprocess_data(data, date_col, target_col):
@@ -35,17 +47,21 @@ def preprocess_data(data, date_col, target_col):
     # Remove zero and negative values
     df = df[df['y'] > 0]
 
-    # Outlier detection and removal using IQR
-    Q1 = df['y'].quantile(0.25)
-    Q3 = df['y'].quantile(0.75)
-    IQR = Q3 - Q1
-    outlier_threshold = 1.5 * IQR
-    df = df[(df['y'] >= Q1 - outlier_threshold) & (df['y'] <= Q3 + outlier_threshold)]
-
-    # Log transformation to stabilize variance
+    # Apply log transformation to stabilize variance
     df['y'] = np.log(df['y'])
 
-    # Add additional regressors
+    # Winsorize outliers to cap extreme values at 5th and 95th percentiles
+    lower_percentile = df['y'].quantile(0.05)
+    upper_percentile = df['y'].quantile(0.95)
+    df['y'] = np.clip(df['y'], lower_percentile, upper_percentile)
+
+    # Calculate lunar phases
+    df['lunar_phase'] = calculate_lunar_phase(df['ds'])
+
+    # Optionally, apply Z-score outlier detection (optional)
+    df = df[(np.abs(stats.zscore(df['y'])) < 3)]  # Remove rows where Z-score is too high (outliers)
+
+    # Add additional regressors (for seasonality and trend factors)
     df['day_of_week'] = df['ds'].dt.dayofweek
     df['month'] = df['ds'].dt.month
 
@@ -97,6 +113,7 @@ def train_model(train_data, holidays, changepoint_prior, seasonality_prior, n_ch
     # Adding regressors
     model.add_regressor('day_of_week')
     model.add_regressor('month')
+    model.add_regressor('lunar_phase')  # Ensure this line is included
 
     with st.spinner("Training the model..."):
         model.fit(train_data)
@@ -108,8 +125,12 @@ def make_forecast(model, periods, include_history=True):
     Make future predictions using the trained model.
     """
     future = model.make_future_dataframe(periods=periods, include_history=include_history)
+
+    # Ensure future DataFrame includes the necessary regressors
     future['day_of_week'] = future['ds'].dt.dayofweek
     future['month'] = future['ds'].dt.month
+    future['lunar_phase'] = calculate_lunar_phase(future['ds'])  # Calculate lunar phase for future dates
+
     forecast = model.predict(future)
     return forecast
 
@@ -119,8 +140,12 @@ def evaluate_model(model, test_data):
     """
     # Make predictions
     future_test = model.make_future_dataframe(periods=len(test_data), include_history=False)
+
+    # Ensure future_test DataFrame includes the necessary regressors
     future_test['day_of_week'] = future_test['ds'].dt.dayofweek
     future_test['month'] = future_test['ds'].dt.month
+    future_test['lunar_phase'] = calculate_lunar_phase(future_test['ds'])  # Calculate lunar phase for test data
+
     forecast = model.predict(future_test)
     predicted = forecast[['ds', 'yhat']].set_index('ds')
     actual = test_data[['ds', 'y']].set_index('ds')
@@ -173,6 +198,7 @@ def hyperparameter_tuning(train_data, test_data, holidays):
         # Adding regressors
         model.add_regressor('day_of_week')
         model.add_regressor('month')
+        model.add_regressor('lunar_phase')  # Add lunar phase
         model.fit(train_data)
 
         # Evaluate model
@@ -216,14 +242,8 @@ def main():
 
     if uploaded_file is not None:
         # Load data
-        sales_df = load_data(uploaded_file)
+        sales_df = load_data(uploaded_file)  # Pass the uploaded file here
         if sales_df is not None:
-            #st.write("Data Preview:")
-            #st.dataframe(sales_df.head())
-
-            # Select date and target columns
-            #date_col = st.selectbox("Select Date Column", sales_df.columns)
-            #target_col = st.selectbox("Select Target Column (Sales Amount)", sales_df.columns)
             date_col = 'DATE'
             target_col = 'AMOUNT'
 
@@ -233,14 +253,15 @@ def main():
             # Preprocess data
             prophet_data = preprocess_data(sales_df, date_col, target_col)
 
-            # Check if data is sufficient
+            # Ensure enough data is available
             if len(prophet_data) < 30:
                 st.error("Not enough data points. Please provide more data.")
                 return
 
             # Train-Test Split
             test_size = st.sidebar.slider("Select the number of periods for testing", min_value=1, max_value=365, value=12)
-            test_size = 12
+
+            # Split into train and test
             train_data = prophet_data.iloc[:-test_size]
             test_data = prophet_data.iloc[-test_size:]
 
@@ -253,7 +274,6 @@ def main():
             if st.sidebar.button("Run Hyperparameter Tuning"):
                 best_model, best_params = hyperparameter_tuning(train_data, test_data, holidays)
             else:
-                # Default parameters
                 changepoint_prior = st.sidebar.slider(
                     "Changepoint Prior Scale", min_value=0.001, max_value=0.5, value=0.05, step=0.001
                 )
@@ -263,7 +283,6 @@ def main():
                 n_changepoints = st.sidebar.selectbox(
                     "Number of Changepoints", options=[25, 50, 100], index=1
                 )
-                # Train model
                 best_model = train_model(train_data, holidays, changepoint_prior, seasonality_prior, n_changepoints)
 
             # Make forecast
