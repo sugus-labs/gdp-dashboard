@@ -1,2 +1,6 @@
-streamlit
-pandas
+streamlit==1.39.0
+prophet==1.1.6
+scikit-learn==1.5.2
+plotly==5.24.1
+matplotlib==3.9.2
+plotly==5.24.1
