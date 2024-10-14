@@ -211,7 +211,7 @@ def hyperparameter_tuning(train_data, test_data, holidays):
             best_model = model
 
     st.write(f"Best MAPE after hyperparameter tuning: {best_mape:.2f}%")
-    st.write(f"Optimal parameters: {best_params}")
+    st.json(best_params)
     return best_model, best_params
 
 
